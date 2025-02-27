@@ -11,7 +11,7 @@ enum DocScanFormat {
 }
 
 /// The main class for scanning documents.
-class DocScan {
+class DocumentScanner {
   static const MethodChannel _channel = MethodChannel('doc_scan');
 
   /// Scans a document and returns the file path(s) of the scanned document(s).
