@@ -1,0 +1,28 @@
+PODS:
+  - doc_scan (1.0.0):
+    - Flutter
+  - Flutter (1.0.0)
+  - integration_test (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - doc_scan (from `.symlinks/plugins/doc_scan/ios`)
+  - Flutter (from `Flutter`)
+  - integration_test (from `.symlinks/plugins/integration_test/ios`)
+
+EXTERNAL SOURCES:
+  doc_scan:
+    :path: ".symlinks/plugins/doc_scan/ios"
+  Flutter:
+    :path: Flutter
+  integration_test:
+    :path: ".symlinks/plugins/integration_test/ios"
+
+SPEC CHECKSUMS:
+  doc_scan: c22a61bb66e5d97470267586adf0a07683648f57
+  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+  integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
+
+PODFILE CHECKSUM: 45051f8f5d22892b0cc668c7b17779d61c34d6e2
+
+COCOAPODS: 1.16.2

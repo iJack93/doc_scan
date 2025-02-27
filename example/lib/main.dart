@@ -1,61 +1,87 @@
-import 'package:flutter/material.dart';
-import 'dart:async';
-
-import 'package:flutter/services.dart';
 import 'package:doc_scan/doc_scan.dart';
+import 'package:flutter/material.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: DocScanPage(),
+    );
+  }
 }
 
-class _MyAppState extends State<MyApp> {
-  String _platformVersion = 'Unknown';
-  final _docScanPlugin = DocScan();
+class DocScanPage extends StatefulWidget {
+  const DocScanPage({super.key});
 
   @override
-  void initState() {
-    super.initState();
-    initPlatformState();
-  }
+  State<DocScanPage> createState() => _DocScanPageState();
+}
 
-  // Platform messages are asynchronous, so we initialize in an async method.
-  Future<void> initPlatformState() async {
-    String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
+class _DocScanPageState extends State<DocScanPage> {
+  DocScanFormat _format = DocScanFormat.jpeg;
+  List<String>? _scannedFiles;
+  String? _errorMessage;
+
+  Future<void> _scanDocument() async {
     try {
-      platformVersion =
-          await _docScanPlugin.getPlatformVersion() ?? 'Unknown platform version';
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
+      setState(() {
+        _scannedFiles = null;
+        _errorMessage = null;
+      });
+
+      final result = await DocScan.scan(format: _format);
+      setState(() => _scannedFiles = result);
+    } on DocScanException catch (e) {
+      setState(() => _errorMessage = e.message);
     }
-
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
-    if (!mounted) return;
-
-    setState(() {
-      _platformVersion = platformVersion;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Plugin example app'),
-        ),
-        body: Center(
-          child: Text('Running on: $_platformVersion\n'),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Doc Scan')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            const Text("Scan a document with custom options:"),
+            const SizedBox(height: 20),
+
+            // Format Selection
+            DropdownButton<DocScanFormat>(
+              value: _format,
+              onChanged: (value) => setState(() => _format = value!),
+              items: const [
+                DropdownMenuItem(
+                  value: DocScanFormat.jpeg,
+                  child: Text("JPEG"),
+                ),
+                DropdownMenuItem(value: DocScanFormat.pdf, child: Text("PDF")),
+              ],
+            ),
+
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _scanDocument,
+              child: const Text("Scan Document"),
+            ),
+            const SizedBox(height: 20),
+
+            if (_errorMessage != null)
+              Text(
+                "Error: $_errorMessage",
+                style: const TextStyle(color: Colors.red),
+              ),
+            if (_scannedFiles != null)
+              ..._scannedFiles!.map((path) => Text(path)),
+          ],
         ),
       ),
     );

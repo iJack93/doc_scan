@@ -1,6 +1,5 @@
+import 'package:doc_scan/doc_scan_method_channel.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
-
-import 'doc_scan_method_channel.dart';
 
 abstract class DocScanPlatform extends PlatformInterface {
   /// Constructs a DocScanPlatform.
@@ -21,9 +20,5 @@ abstract class DocScanPlatform extends PlatformInterface {
   static set instance(DocScanPlatform instance) {
     PlatformInterface.verifyToken(instance, _token);
     _instance = instance;
-  }
-
-  Future<String?> getPlatformVersion() {
-    throw UnimplementedError('platformVersion() has not been implemented.');
   }
 }

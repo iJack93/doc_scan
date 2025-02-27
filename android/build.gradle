@@ -28,6 +28,7 @@ android {
     namespace = "fr.ideeri.doc_scan"
 
     compileSdk = 35
+    ndkVersion = "26.3.11579264" 
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -50,6 +51,7 @@ android {
     dependencies {
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")
+	    implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1'
     }
 
     testOptions {
