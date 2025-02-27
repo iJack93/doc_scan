@@ -3,7 +3,7 @@
 # Run `pod lib lint doc_scan.podspec` to validate before publishing.
 #
 Pod::Spec.new do |s|
-  s.name             = 'doc_scan'
+  s.name             = 'doc_scan_flutter'
   s.version          = '1.0.0'
   s.summary          = 'A Flutter plugin for scanning documents using native APIs.'
   s.description      = 'This plugin allows scanning documents using ML Kit on Android and VisionKit on iOS.'
