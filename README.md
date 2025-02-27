@@ -14,7 +14,7 @@ Add this to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  doc_scan: ^1.0.0
+  doc_scan: ^1.0.1
 ```
 
 Run:
