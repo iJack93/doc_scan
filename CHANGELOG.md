@@ -1,3 +1,7 @@
+## 1.0.2
+
+* Conform to pub.dev rules
+
 ## 1.0.1
 
 * Fixe some naming issues
