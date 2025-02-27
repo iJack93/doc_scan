@@ -1,5 +1,7 @@
 # doc_scan_flutter
 
+![Pub Version](https://img.shields.io/pub/v/doc_scan_flutter)
+
 doc_scan_flutter is a Flutter package that lets you scan documents as PDF or JPEG using native platform APIs. It automatically detects edges, crops, and enhances colors to give you a clean scan—just like a dedicated scanner app. Inspired by [flutter_doc_scanner](https://pub.dev/packages/flutter_doc_scanner), but with improved typing and compatibility
 
 | what the user scans                                                                                         | the result you get                                                                                         |
