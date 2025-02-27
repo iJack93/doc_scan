@@ -1,3 +1,8 @@
+## 1.0.5
+
+* Make sure the Android code doesn't return URIs prefixed with `file://`, since they're not dart-friendly
+* Some cleanup
+
 ## 1.0.4
 
 * ANOTHER NAMING ISSUE
