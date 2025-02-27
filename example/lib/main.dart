@@ -38,7 +38,7 @@ class _DocScanPageState extends State<DocScanPage> {
 
       final result = await DocScan.scan(format: _format);
       setState(() => _scannedFiles = result);
-    } on DocScanException catch (e) {
+    } on DocumentScannerException catch (e) {
       setState(() => _errorMessage = e.message);
     }
   }

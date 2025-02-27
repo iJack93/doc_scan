@@ -16,7 +16,7 @@ class DocumentScanner {
 
   /// Scans a document and returns the file path(s) of the scanned document(s).
   ///
-  /// Throws a [DocScanException] if the scan fails.
+  /// Throws a [DocumentScannerException] if the scan fails.
   static Future<List<String>?> scan({
     DocScanFormat format = DocScanFormat.jpeg,
   }) async {
@@ -26,26 +26,26 @@ class DocumentScanner {
       });
 
       if (result == null || result is! List) {
-        throw DocScanException(
+        throw DocumentScannerException(
           'Invalid response from native code, expected a List, got $result',
         );
       }
 
       return result.cast<String>();
     } on PlatformException catch (e) {
-      throw DocScanException(e.message ?? 'Unknown error');
+      throw DocumentScannerException(e.message ?? 'Unknown error');
     }
   }
 }
 
 /// Exception thrown when the document scanning fails.
-class DocScanException implements Exception {
-  /// Creates a [DocScanException] with the given message.
-  DocScanException(this.message);
+class DocumentScannerException implements Exception {
+  /// Creates a [DocumentScannerException] with the given message.
+  DocumentScannerException(this.message);
 
   /// The error message.
   final String message;
 
   @override
-  String toString() => 'DocScanException: $message';
+  String toString() => 'DocumentScannerException: $message';
 }
