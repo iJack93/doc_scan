@@ -1,3 +1,7 @@
+## 1.0.4
+
+* ANOTHER NAMING ISSUE
+
 ## 1.0.3
 
 * Fix wrong name on the main class
