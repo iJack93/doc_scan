@@ -1,4 +1,4 @@
-import 'package:doc_scan/doc_scan_method_channel.dart';
+import 'package:doc_scan_flutter/doc_scan_method_channel.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 abstract class DocScanPlatform extends PlatformInterface {

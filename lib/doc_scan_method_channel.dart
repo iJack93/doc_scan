@@ -1,4 +1,4 @@
-import 'package:doc_scan/doc_scan_platform_interface.dart';
+import 'package:doc_scan_flutter/doc_scan_platform_interface.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 

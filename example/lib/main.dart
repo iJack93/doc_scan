@@ -1,4 +1,4 @@
-import 'package:doc_scan/doc_scan.dart';
+import 'package:doc_scan_flutter/doc_scan.dart';
 import 'package:flutter/material.dart';
 
 void main() {
