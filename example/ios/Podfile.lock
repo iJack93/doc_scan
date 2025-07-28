@@ -4,11 +4,14 @@ PODS:
   - Flutter (1.0.0)
   - integration_test (0.0.1):
     - Flutter
+  - open_file_ios (0.0.1):
+    - Flutter
 
 DEPENDENCIES:
   - doc_scan_flutter (from `.symlinks/plugins/doc_scan_flutter/ios`)
   - Flutter (from `Flutter`)
   - integration_test (from `.symlinks/plugins/integration_test/ios`)
+  - open_file_ios (from `.symlinks/plugins/open_file_ios/ios`)
 
 EXTERNAL SOURCES:
   doc_scan_flutter:
@@ -17,11 +20,14 @@ EXTERNAL SOURCES:
     :path: Flutter
   integration_test:
     :path: ".symlinks/plugins/integration_test/ios"
+  open_file_ios:
+    :path: ".symlinks/plugins/open_file_ios/ios"
 
 SPEC CHECKSUMS:
   doc_scan_flutter: d0271acc6b4e826e9498352c9f10f39408addf8b
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
+  open_file_ios: 5ff7526df64e4394b4fe207636b67a95e83078bb
 
 PODFILE CHECKSUM: 45051f8f5d22892b0cc668c7b17779d61c34d6e2
 
