@@ -2,6 +2,10 @@ PODS:
   - doc_scan_flutter (1.0.0):
     - Flutter
   - Flutter (1.0.0)
+  - flutter_exif_rotation (0.3.0):
+    - Flutter
+  - image_picker_ios (0.0.1):
+    - Flutter
   - integration_test (0.0.1):
     - Flutter
   - open_file_ios (0.0.1):
@@ -10,6 +14,8 @@ PODS:
 DEPENDENCIES:
   - doc_scan_flutter (from `.symlinks/plugins/doc_scan_flutter/ios`)
   - Flutter (from `Flutter`)
+  - flutter_exif_rotation (from `.symlinks/plugins/flutter_exif_rotation/ios`)
+  - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
   - integration_test (from `.symlinks/plugins/integration_test/ios`)
   - open_file_ios (from `.symlinks/plugins/open_file_ios/ios`)
 
@@ -18,6 +24,10 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/doc_scan_flutter/ios"
   Flutter:
     :path: Flutter
+  flutter_exif_rotation:
+    :path: ".symlinks/plugins/flutter_exif_rotation/ios"
+  image_picker_ios:
+    :path: ".symlinks/plugins/image_picker_ios/ios"
   integration_test:
     :path: ".symlinks/plugins/integration_test/ios"
   open_file_ios:
@@ -26,6 +36,8 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   doc_scan_flutter: d0271acc6b4e826e9498352c9f10f39408addf8b
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+  flutter_exif_rotation: 5406455759acacf1f7b1b83e85dbb545340d6e9c
+  image_picker_ios: 7fe1ff8e34c1790d6fff70a32484959f563a928a
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
   open_file_ios: 5ff7526df64e4394b4fe207636b67a95e83078bb
 

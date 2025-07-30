@@ -8,7 +8,6 @@ plugins {
 android {
     namespace = "fr.ideeri.doc_scan_example"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

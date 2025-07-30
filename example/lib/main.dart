@@ -5,6 +5,8 @@ import 'dart:ui' as ui;
 import 'package:doc_scan_flutter/doc_scan.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_exif_rotation/flutter_exif_rotation.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:open_file/open_file.dart';
 import 'package:photo_view/photo_view.dart';
 
@@ -41,6 +43,8 @@ class _DocScanPageState extends State<DocScanPage> {
   String? _errorMessage;
   bool _isLoading = false;
 
+  final ImagePicker _picker = ImagePicker();
+
   Future<void> _startScanProcess(String source) async {
     setState(() {
       _isLoading = true;
@@ -49,7 +53,18 @@ class _DocScanPageState extends State<DocScanPage> {
     });
 
     try {
-      final tempImagePath = await DocumentScanner.getImage(source: source);
+      String? tempImagePath;
+      if(Platform.isIOS) {
+        tempImagePath = await DocumentScanner.getImage(source: source);
+      } else if(Platform.isAndroid) {
+        final XFile? pickedFile = await _picker.pickImage(source: source == "gallery" ? ImageSource.gallery : ImageSource.camera, imageQuality: 80);
+        if (pickedFile == null) {
+          setState(() => _isLoading = false);
+          return;
+        }
+        final image = await FlutterExifRotation.rotateImage(path: pickedFile.path);
+        tempImagePath = image.path;
+      }
       if (tempImagePath == null) {
         setState(() => _isLoading = false);
         return;
@@ -59,7 +74,7 @@ class _DocScanPageState extends State<DocScanPage> {
         context,
         MaterialPageRoute(
           builder: (context) => PreviewPage(
-            originalImagePath: tempImagePath,
+            originalImagePath: tempImagePath!,
             format: _format,
           ),
         ),

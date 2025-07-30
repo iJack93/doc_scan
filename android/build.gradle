@@ -2,15 +2,17 @@ group = "fr.ideeri.doc_scan"
 version = "1.0-SNAPSHOT"
 
 buildscript {
-    ext.kotlin_version = "1.8.22"
+    ///compatible with flutter 3.29
+    ext.kotlin_version = "1.9.22"
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath("com.android.tools.build:gradle:8.7.0")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+        ///compatible with flutter 3.29
+        classpath 'com.android.tools.build:gradle:8.3.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
 
@@ -27,31 +29,41 @@ apply plugin: "kotlin-android"
 android {
     namespace = "fr.ideeri.doc_scan"
 
-    compileSdk = 35
-    ndkVersion = "26.3.11579264" 
+    compileSdk 35
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11
+        jvmTarget = '1.8'
     }
 
     sourceSets {
-        main.java.srcDirs += "src/main/kotlin"
-        test.java.srcDirs += "src/test/kotlin"
+        main.java.srcDirs += 'src/main/kotlin'
+        test.java.srcDirs += 'src/test/kotlin'
     }
 
     defaultConfig {
-        minSdk = 21
+        minSdkVersion 19
+        compileSdk 35
     }
 
     dependencies {
-        testImplementation("org.jetbrains.kotlin:kotlin-test")
-        testImplementation("org.mockito:mockito-core:5.0.0")
-	    implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1'
+        testImplementation 'org.jetbrains.kotlin:kotlin-test'
+        testImplementation 'org.mockito:mockito-core:5.18.0'
+        implementation "org.opencv:opencv:4.12.0"
+
+        // Usa versioni stabili delle Coroutines compatibili con Kotlin 1.9.22
+        implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
+        implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+
+        // Usa versioni stabili delle librerie AndroidX
+        implementation "androidx.activity:activity-ktx:1.8.2"
+        implementation "androidx.appcompat:appcompat:1.6.1"
+
+        implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1'
     }
 
     testOptions {
@@ -59,9 +71,9 @@ android {
             useJUnitPlatform()
 
             testLogging {
-               events "passed", "skipped", "failed", "standardOut", "standardError"
-               outputs.upToDateWhen {false}
-               showStandardStreams = true
+                events "passed", "skipped", "failed", "standardOut", "standardError"
+                outputs.upToDateWhen {false}
+                showStandardStreams = true
             }
         }
     }
