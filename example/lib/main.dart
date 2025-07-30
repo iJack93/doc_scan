@@ -151,6 +151,10 @@ class _PreviewPageState extends State<PreviewPage> {
   DocScanFilter _filter = DocScanFilter.blackAndWhite;
   String? _previewImagePath;
   String? _errorMessage;
+  bool _isCustomizing = false;
+  double _brightness = 0.0;
+  double _contrast = 1.0;
+  double _threshold = 1.0; // **NUOVO**: Stato per la soglia B&N
 
   @override
   void initState() {
@@ -181,7 +185,10 @@ class _PreviewPageState extends State<PreviewPage> {
         imagePath: widget.originalImagePath,
         quad: _quad!,
         format: DocScanFormat.jpeg, // L'anteprima è sempre jpeg
-        filter: _filter,
+        filter: _isCustomizing ? DocScanFilter.custom : _filter,
+        brightness: _isCustomizing ? _brightness : null,
+        contrast: _isCustomizing ? _contrast : null,
+        threshold: _isCustomizing ? _threshold : null, // **NUOVO**
       );
       setState(() {
         _previewImagePath = newPreviewPath;
@@ -210,18 +217,28 @@ class _PreviewPageState extends State<PreviewPage> {
 
   Future<void> _editFilter() async {
     if (_quad == null) return;
-    final newFilter = await Navigator.push<DocScanFilter>(
+    final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
         builder: (context) => FilterPage(
           originalImagePath: widget.originalImagePath,
           quad: _quad!,
           initialFilter: _filter,
+          isCustomizing: _isCustomizing,
+          initialBrightness: _brightness,
+          initialContrast: _contrast,
+          initialThreshold: _threshold, // **NUOVO**
         ),
       ),
     );
-    if (newFilter != null) {
-      _filter = newFilter;
+    if (result != null) {
+      setState(() {
+        _isCustomizing = result['isCustomizing'] as bool;
+        _filter = result['filter'] as DocScanFilter;
+        _brightness = result['brightness'] as double;
+        _contrast = result['contrast'] as double;
+        _threshold = result['threshold'] as double; // **NUOVO**
+      });
       await _regeneratePreview();
     }
   }
@@ -232,7 +249,10 @@ class _PreviewPageState extends State<PreviewPage> {
       imagePath: widget.originalImagePath,
       quad: _quad!,
       format: widget.format,
-      filter: _filter,
+      filter: _isCustomizing ? DocScanFilter.custom : _filter,
+      brightness: _isCustomizing ? _brightness : null,
+      contrast: _isCustomizing ? _contrast : null,
+      threshold: _isCustomizing ? _threshold : null, // **NUOVO**
     );
     if (mounted) Navigator.pop(context, finalPath);
   }
@@ -317,7 +337,6 @@ class _CropPageState extends State<CropPage> {
           )
         ],
       ),
-      // **MODIFICA**: Usa LayoutBuilder per ottenere i limiti del body
       body: LayoutBuilder(
         builder: (context, constraints) {
           return CropEditor(
@@ -326,7 +345,6 @@ class _CropPageState extends State<CropPage> {
             onQuadChanged: (newQuad) {
               _quad = newQuad;
             },
-            // Passa i limiti del body al widget editor
             scaffoldBodyConstraints: constraints,
           );
         },
@@ -343,12 +361,20 @@ class FilterPage extends StatefulWidget {
   final String originalImagePath;
   final Quadrilateral quad;
   final DocScanFilter initialFilter;
+  final bool isCustomizing;
+  final double initialBrightness;
+  final double initialContrast;
+  final double initialThreshold; // **NUOVO**
 
   const FilterPage({
     super.key,
     required this.originalImagePath,
     required this.quad,
     required this.initialFilter,
+    required this.isCustomizing,
+    required this.initialBrightness,
+    required this.initialContrast,
+    required this.initialThreshold, // **NUOVO**
   });
 
   @override
@@ -360,21 +386,41 @@ class _FilterPageState extends State<FilterPage> {
   String? _previewImagePath;
   bool _isRendering = true;
 
+  late bool _isCustomizing;
+  late double _brightness;
+  late double _contrast;
+  late double _threshold; // **NUOVO**
+
+  Timer? _debounce;
+
   @override
   void initState() {
     super.initState();
     _selectedFilter = widget.initialFilter;
-    _renderPreview(_selectedFilter);
+    _isCustomizing = widget.isCustomizing;
+    _brightness = widget.initialBrightness;
+    _contrast = widget.initialContrast;
+    _threshold = widget.initialThreshold; // **NUOVO**
+    _regeneratePreview();
   }
 
-  Future<void> _renderPreview(DocScanFilter filter) async {
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _regeneratePreview() async {
     setState(() => _isRendering = true);
     try {
       final newPath = await DocumentScanner.applyCropAndSave(
         imagePath: widget.originalImagePath,
         quad: widget.quad,
         format: DocScanFormat.jpeg,
-        filter: filter,
+        filter: _isCustomizing ? DocScanFilter.custom : _selectedFilter,
+        brightness: _isCustomizing ? _brightness : null,
+        contrast: _isCustomizing ? _contrast : null,
+        threshold: _isCustomizing ? _threshold : null, // **NUOVO**
       );
       setState(() {
         _previewImagePath = newPath;
@@ -385,6 +431,75 @@ class _FilterPageState extends State<FilterPage> {
     }
   }
 
+  void _onSliderChanged() {
+    if (_debounce?.isActive ?? false) _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      _regeneratePreview();
+    });
+  }
+
+  void _showCustomFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black12,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Container(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text("Luminosità", style: Theme.of(context).textTheme.titleMedium),
+                  Slider(
+                    value: _brightness,
+                    min: -100.0,
+                    max: 100.0,
+                    divisions: 20,
+                    label: _brightness.round().toString(),
+                    onChanged: (value) {
+                      setModalState(() => _brightness = value);
+                      _onSliderChanged();
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text("Contrasto", style: Theme.of(context).textTheme.titleMedium),
+                  Slider(
+                    value: _contrast,
+                    min: 0.5,
+                    max: 2.0,
+                    divisions: 15,
+                    label: _contrast.toStringAsFixed(1),
+                    onChanged: (value) {
+                      setModalState(() => _contrast = value);
+                      _onSliderChanged();
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text("Soglia B&N", style: Theme.of(context).textTheme.titleMedium), // **NUOVO**
+                  Slider(
+                    value: _threshold,
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 20,
+                    label: _threshold.toStringAsFixed(2),
+                    onChanged: (value) {
+                      setModalState(() => _threshold = value);
+                      _onSliderChanged();
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -393,7 +508,13 @@ class _FilterPageState extends State<FilterPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.check),
-            onPressed: () => Navigator.pop(context, _selectedFilter),
+            onPressed: () => Navigator.pop(context, {
+              'filter': _selectedFilter,
+              'isCustomizing': _isCustomizing,
+              'brightness': _brightness,
+              'contrast': _contrast,
+              'threshold': _threshold, // **NUOVO**
+            }),
           )
         ],
       ),
@@ -418,23 +539,35 @@ class _FilterPageState extends State<FilterPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _buildFilterChip(DocScanFilter.none, "Originale", Icons.image_outlined),
-          _buildFilterChip(DocScanFilter.grayscale, "Grigio", Icons.filter_b_and_w_outlined),
-          _buildFilterChip(DocScanFilter.blackAndWhite, "B&N", Icons.contrast_outlined),
+          _buildFilterChip(DocScanFilter.none, "Originale", Icons.image_outlined, false),
+          _buildFilterChip(DocScanFilter.grayscale, "Grigio", Icons.filter_b_and_w_outlined, false),
+          _buildFilterChip(DocScanFilter.blackAndWhite, "B&N", Icons.contrast_outlined, false),
+          _buildFilterChip(null, "Custom", Icons.tune_outlined, true),
         ],
       ),
     );
   }
 
-  Widget _buildFilterChip(DocScanFilter filter, String label, IconData icon) {
-    final bool isSelected = _selectedFilter == filter;
+  Widget _buildFilterChip(DocScanFilter? filter, String label, IconData icon, bool isCustom) {
+    final bool isSelected = isCustom ? _isCustomizing : (_selectedFilter == filter && !_isCustomizing);
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         InkWell(
           onTap: () {
-            setState(() => _selectedFilter = filter);
-            _renderPreview(filter);
+            if (isCustom) {
+              setState(() {
+                _isCustomizing = true;
+              });
+              _showCustomFilterSheet();
+            } else {
+              setState(() {
+                _isCustomizing = false;
+                _selectedFilter = filter!;
+              });
+              _regeneratePreview();
+            }
           },
           borderRadius: BorderRadius.circular(24),
           child: Container(
@@ -463,7 +596,6 @@ class CropEditor extends StatefulWidget {
   final String imagePath;
   final Quadrilateral initialQuad;
   final ValueChanged<Quadrilateral> onQuadChanged;
-  // **MODIFICA**: Accetta i limiti del body
   final BoxConstraints scaffoldBodyConstraints;
 
   const CropEditor({
@@ -542,7 +674,6 @@ class _CropEditorState extends State<CropEditor> {
     _handleDrag(details.localPosition, containerSize, _draggingCornerIndex!);
   }
 
-  /// Metodo unificato per gestire l'aggiornamento della posizione del corner.
   void _handleDrag(Offset localPosition, Size containerSize, int cornerIndex) {
     final double dx = localPosition.dx.clamp(0, containerSize.width) / containerSize.width;
     final double dy = 1 - (localPosition.dy.clamp(0, containerSize.height) / containerSize.height);
@@ -590,7 +721,7 @@ class _CropEditorState extends State<CropEditor> {
               final containerSize = constraints.biggest;
               return Stack(
                 fit: StackFit.expand,
-                clipBehavior: Clip.none, // Permette alla lente di uscire
+                clipBehavior: Clip.none,
                 children: [
                   Image.file(File(widget.imagePath), fit: BoxFit.contain),
                   CustomPaint(painter: CropPainter(_quad), size: Size.infinite),
@@ -611,33 +742,25 @@ class _CropEditorState extends State<CropEditor> {
     );
   }
 
-  /// ===================================================================
-  /// LENTE D'INGRANDIMENTO CON LOGICA DEFINITIVA
-  /// ===================================================================
   Widget _buildMagnifier(Size imageContainerSize) {
     const double magnifierSize = 120;
     const double zoomFactor = 2.0;
-    const double verticalOffset = 40.0; // Spazio tra il dito e la lente
+    const double verticalOffset = 40.0;
 
     if (_draggingCornerIndex == null) return const SizedBox.shrink();
 
-    // **NUOVA LOGICA DI POSIZIONAMENTO**
-    // Dimensioni e offset del contenitore dell'immagine rispetto al body
     final scaffoldBodySize = widget.scaffoldBodyConstraints.biggest;
     final offsetInScaffold = Offset(
       (scaffoldBodySize.width - imageContainerSize.width) / 2,
       (scaffoldBodySize.height - imageContainerSize.height) / 2,
     );
 
-    // Prova a posizionare la lente sopra il dito.
     double magnifierTop = _dragPosition.dy - magnifierSize - verticalOffset;
 
-    // Se non c'è abbastanza spazio sopra (considerando l'offset), la posiziona sotto.
     if (magnifierTop + offsetInScaffold.dy < 0) {
       magnifierTop = _dragPosition.dy + verticalOffset;
     }
 
-    // Calcola la posizione finale e la blocca entro i limiti del body
     final finalLeft = (_dragPosition.dx - magnifierSize / 2 + offsetInScaffold.dx)
         .clamp(0.0, scaffoldBodySize.width - magnifierSize) - offsetInScaffold.dx;
 
@@ -646,7 +769,6 @@ class _CropEditorState extends State<CropEditor> {
 
     final magnifierPosition = Offset(finalLeft, finalTop);
 
-    // Posizione del contenuto zoomato all'interno della lente.
     final contentLeft = magnifierSize / 2 - _dragPosition.dx * zoomFactor;
     final contentTop = magnifierSize / 2 - _dragPosition.dy * zoomFactor;
 
@@ -667,7 +789,6 @@ class _CropEditorState extends State<CropEditor> {
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Contenuto zoomato e traslato
                 Positioned(
                   left: contentLeft,
                   top: contentTop,
@@ -693,7 +814,6 @@ class _CropEditorState extends State<CropEditor> {
                     ),
                   ),
                 ),
-                // Mirino
                 Container(
                   width: magnifierSize,
                   height: 1.5,
@@ -792,12 +912,16 @@ class CropPainter extends CustomPainter {
 
 class ImageDetailPage extends StatelessWidget {
   final String imagePath;
+
   const ImageDetailPage({super.key, required this.imagePath});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)),
+      appBar: AppBar(backgroundColor: Colors.black,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.white)),
       body: PhotoView(
         imageProvider: FileImage(File(imagePath)),
         minScale: PhotoViewComputedScale.contained,

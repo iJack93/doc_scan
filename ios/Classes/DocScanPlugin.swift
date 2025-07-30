@@ -40,11 +40,15 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
                   let imagePath = args["imagePath"] as? String,
                   let quadValues = args["quad"] as? [String: Double],
                   let format = args["format"] as? String,
-                  let filter = args["filter"] as? String else { // Nuovo parametro per il filtro
+                  let filter = args["filter"] as? String else {
                 result(FlutterError(code: "INVALID_ARGS", message: "Argomenti mancanti o non validi per 'applyCropAndSave'", details: nil))
                 return
             }
-            applyCropAndSave(imagePath: imagePath, quadValues: quadValues, format: format, filter: filter)
+            let brightness = args["brightness"] as? Double
+            let contrast = args["contrast"] as? Double
+            let threshold = args["threshold"] as? Double // **NUOVO**: Parametro per la soglia B&N
+
+            applyCropAndSave(imagePath: imagePath, quadValues: quadValues, format: format, filter: filter, brightness: brightness, contrast: contrast, threshold: threshold)
 
         default:
             result(FlutterMethodNotImplemented)
@@ -107,7 +111,7 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
         }
     }
 
-    private func applyCropAndSave(imagePath: String, quadValues: [String: Double], format: String, filter: String) {
+    private func applyCropAndSave(imagePath: String, quadValues: [String: Double], format: String, filter: String, brightness: Double?, contrast: Double?, threshold: Double?) {
         guard let image = UIImage(contentsOfFile: imagePath) else {
             flutterResult?(FlutterError(code: "FILE_NOT_FOUND", message: "Impossibile caricare l'immagine originale", details: nil))
             return
@@ -118,38 +122,41 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
             return
         }
 
-        let finalImage = processImage(for: image, with: quad, filter: filter)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let finalImage = self.processImage(for: image, with: quad, filter: filter, brightness: brightness, contrast: contrast, threshold: threshold)
 
-        let tempDir = NSTemporaryDirectory()
-        let filename = "\(UUID().uuidString).\(format)"
-        let finalPath = tempDir.appending(filename)
+            let tempDir = NSTemporaryDirectory()
+            let filename = "\(UUID().uuidString).\(format)"
+            let finalPath = tempDir.appending(filename)
 
-        var success = false
-        if format == "pdf" {
-            if let pdfPath = saveImageAsPDF(image: finalImage, at: finalPath) {
-                success = true
-            }
-        } else { // jpeg
-            if let data = finalImage.jpegData(compressionQuality: 0.8) {
-                do {
-                    try data.write(to: URL(fileURLWithPath: finalPath))
+            var success = false
+            if format == "pdf" {
+                if let pdfPath = self.saveImageAsPDF(image: finalImage, at: finalPath) {
                     success = true
-                } catch {}
+                }
+            } else { // jpeg
+                if let data = finalImage.jpegData(compressionQuality: 0.8) {
+                    do {
+                        try data.write(to: URL(fileURLWithPath: finalPath))
+                        success = true
+                    } catch {}
+                }
             }
-        }
 
-        if success {
-            flutterResult?(finalPath)
-        } else {
-            flutterResult?(FlutterError(code: "SAVE_ERROR", message: "Impossibile salvare il file finale", details: nil))
+            DispatchQueue.main.async {
+                if success {
+                    self.flutterResult?(finalPath)
+                } else {
+                    self.flutterResult?(FlutterError(code: "SAVE_ERROR", message: "Impossibile salvare il file finale", details: nil))
+                }
+            }
         }
     }
 
     // MARK: - Image Processing Helpers
 
-    /// **MODIFICATO**: Applica sia la correzione della prospettiva che il filtro colore.
-    private func processImage(for image: UIImage, with quad: Quadrilateral, filter filterName: String) -> UIImage {
-        guard let ciImage = CIImage(image: image) else { return image }
+    private func processImage(for image: UIImage, with quad: Quadrilateral, filter filterName: String, brightness: Double?, contrast: Double?, threshold: Double?) -> UIImage {
+        guard var ciImage = CIImage(image: image) else { return image }
         let imageSize = ciImage.extent.size
 
         let perspectiveCorrection = CIFilter(
@@ -166,9 +173,10 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
         guard let perspectiveCorrectedImage = perspectiveCorrection.outputImage else {
             return image
         }
+        ciImage = perspectiveCorrectedImage
 
         // Applica il filtro colore
-        let filteredImage = applyFilter(filterName, to: perspectiveCorrectedImage)
+        let filteredImage = applyFilter(filterName, to: ciImage, brightness: brightness, contrast: contrast, threshold: threshold)
 
         if let finalCgImage = CIContext().createCGImage(filteredImage, from: filteredImage.extent) {
             return UIImage(cgImage: finalCgImage)
@@ -177,25 +185,46 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
         return image
     }
 
-    /// **NUOVO**: Applica un filtro Core Image a un'immagine.
-    private func applyFilter(_ filterName: String, to ciImage: CIImage) -> CIImage {
+    private func applyFilter(_ filterName: String, to ciImage: CIImage, brightness: Double?, contrast: Double?, threshold: Double?) -> CIImage {
+        var outputImage = ciImage
+
         switch filterName {
         case "grayscale":
             if let filter = CIFilter(name: "CIPhotoEffectNoir") {
-                filter.setValue(ciImage, forKey: kCIInputImageKey)
-                return filter.outputImage ?? ciImage
+                filter.setValue(outputImage, forKey: kCIInputImageKey)
+                outputImage = filter.outputImage ?? outputImage
             }
         case "blackAndWhite":
             if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(ciImage, forKey: kCIInputImageKey)
-                filter.setValue(0.0, forKey: kCIInputSaturationKey) // Desatura
-                filter.setValue(2.0, forKey: kCIInputContrastKey)   // Aumenta il contrasto
-                return filter.outputImage ?? ciImage
+                filter.setValue(outputImage, forKey: kCIInputImageKey)
+                filter.setValue(0.0, forKey: kCIInputSaturationKey)
+                filter.setValue(1.5, forKey: kCIInputContrastKey)
+                outputImage = filter.outputImage ?? outputImage
             }
-        default: // "none" o qualsiasi altro valore
-            return ciImage
+        case "custom":
+             if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(outputImage, forKey: kCIInputImageKey)
+                if let b = brightness {
+                    filter.setValue(b / 200.0, forKey: kCIInputBrightnessKey)
+                }
+                if let c = contrast {
+                    filter.setValue(c, forKey: kCIInputContrastKey)
+                }
+                outputImage = filter.outputImage ?? outputImage
+            }
+            // **NUOVO**: Applica il filtro monocromatico se è stato fornito un valore di soglia
+            if let t = threshold {
+                if let monoFilter = CIFilter(name: "CIColorMonochrome") {
+                    monoFilter.setValue(outputImage, forKey: kCIInputImageKey)
+                    monoFilter.setValue(CIColor.white, forKey: kCIInputColorKey)
+                    monoFilter.setValue(t, forKey: kCIInputIntensityKey)
+                    outputImage = monoFilter.outputImage ?? outputImage
+                }
+            }
+        default: // "none"
+            break
         }
-        return ciImage
+        return outputImage
     }
 
     private func saveImageAsPDF(image: UIImage, at path: String) -> String? {
