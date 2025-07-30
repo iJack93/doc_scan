@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:doc_scan_flutter/doc_scan.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,10 @@ import 'package:photo_view/photo_view.dart';
 // flutter
 
 void main() => runApp(const MyApp());
+
+// --------------------------------------------------
+// 1. WIDGET PRINCIPALE E PAGINA INIZIALE
+// --------------------------------------------------
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -31,7 +36,7 @@ class DocScanPage extends StatefulWidget {
 }
 
 class _DocScanPageState extends State<DocScanPage> {
-  DocScanFormat _format = DocScanFormat.jpeg;
+  final DocScanFormat _format = DocScanFormat.jpeg;
   List<String> _finalFilePaths = [];
   String? _errorMessage;
   bool _isLoading = false;
@@ -66,7 +71,9 @@ class _DocScanPageState extends State<DocScanPage> {
     } on PlatformException catch (e) {
       setState(() => _errorMessage = e.message ?? 'Errore sconosciuto');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -127,7 +134,7 @@ class _DocScanPageState extends State<DocScanPage> {
 }
 
 // --------------------------------------------------
-// 3. NUOVA PAGINA DI ANTEPRIMA (PreviewPage.dart)
+// 2. PAGINA DI ANTEPRIMA (PreviewPage)
 // --------------------------------------------------
 
 class PreviewPage extends StatefulWidget {
@@ -276,9 +283,8 @@ class _PreviewPageState extends State<PreviewPage> {
   }
 }
 
-
 // --------------------------------------------------
-// 4. PAGINA DI RITAGLIO (CropPage.dart)
+// 3. PAGINA DI RITAGLIO (CropPage)
 // --------------------------------------------------
 
 class CropPage extends StatefulWidget {
@@ -311,11 +317,18 @@ class _CropPageState extends State<CropPage> {
           )
         ],
       ),
-      body: CropEditor(
-        imagePath: widget.imagePath,
-        initialQuad: _quad,
-        onQuadChanged: (newQuad) {
-          _quad = newQuad;
+      // **MODIFICA**: Usa LayoutBuilder per ottenere i limiti del body
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return CropEditor(
+            imagePath: widget.imagePath,
+            initialQuad: _quad,
+            onQuadChanged: (newQuad) {
+              _quad = newQuad;
+            },
+            // Passa i limiti del body al widget editor
+            scaffoldBodyConstraints: constraints,
+          );
         },
       ),
     );
@@ -323,7 +336,7 @@ class _CropPageState extends State<CropPage> {
 }
 
 // --------------------------------------------------
-// 5. NUOVA PAGINA DEI FILTRI (FilterPage.dart)
+// 4. PAGINA DEI FILTRI (FilterPage)
 // --------------------------------------------------
 
 class FilterPage extends StatefulWidget {
@@ -443,19 +456,22 @@ class _FilterPageState extends State<FilterPage> {
 
 
 // --------------------------------------------------
-// 6. WIDGET DI EDITING (CropEditor.dart) e UTILITY
+// 5. WIDGET DI EDITING (CropEditor) CON LENTE CORRETTA
 // --------------------------------------------------
 
 class CropEditor extends StatefulWidget {
   final String imagePath;
   final Quadrilateral initialQuad;
   final ValueChanged<Quadrilateral> onQuadChanged;
+  // **MODIFICA**: Accetta i limiti del body
+  final BoxConstraints scaffoldBodyConstraints;
 
   const CropEditor({
     super.key,
     required this.imagePath,
     required this.initialQuad,
     required this.onQuadChanged,
+    required this.scaffoldBodyConstraints,
   });
 
   @override
@@ -477,22 +493,22 @@ class _CropEditorState extends State<CropEditor> {
   }
 
   Future<void> _loadImageDimensions() async {
-    final image = Image.file(File(widget.imagePath));
-    final completer = Completer<Size>();
-    image.image.resolve(const ImageConfiguration()).addListener(
+    final image = FileImage(File(widget.imagePath));
+    final completer = Completer<ui.Image>();
+    image.resolve(const ImageConfiguration()).addListener(
       ImageStreamListener((ImageInfo info, bool _) {
         if (!completer.isCompleted) {
-          completer.complete(Size(
-            info.image.width.toDouble(),
-            info.image.height.toDouble(),
-          ));
+          completer.complete(info.image);
         }
       }),
     );
-    final size = await completer.future;
+    final ui.Image imageInfo = await completer.future;
     if (mounted) {
       setState(() {
-        _imageSize = size;
+        _imageSize = Size(
+          imageInfo.width.toDouble(),
+          imageInfo.height.toDouble(),
+        );
       });
     }
   }
@@ -517,29 +533,23 @@ class _CropEditorState extends State<CropEditor> {
     }
 
     if (minDistance < 44) {
-      setState(() {
-        _draggingCornerIndex = closestCorner;
-        _showMagnifier = true;
-        _dragPosition = details.localPosition;
-      });
+      _handleDrag(details.localPosition, containerSize, closestCorner!);
     }
   }
 
   void _onPanUpdate(DragUpdateDetails details, Size containerSize) {
     if (_draggingCornerIndex == null) return;
+    _handleDrag(details.localPosition, containerSize, _draggingCornerIndex!);
+  }
 
-    final Offset localPosition = details.localPosition;
-    setState(() {
-      _dragPosition = localPosition;
-    });
-
+  /// Metodo unificato per gestire l'aggiornamento della posizione del corner.
+  void _handleDrag(Offset localPosition, Size containerSize, int cornerIndex) {
     final double dx = localPosition.dx.clamp(0, containerSize.width) / containerSize.width;
-    final double dy = localPosition.dy.clamp(0, containerSize.height) / containerSize.height;
-
-    final Offset visionPoint = Offset(dx, 1 - dy);
+    final double dy = 1 - (localPosition.dy.clamp(0, containerSize.height) / containerSize.height);
+    final Offset visionPoint = Offset(dx, dy);
 
     Quadrilateral newQuad;
-    switch (_draggingCornerIndex) {
+    switch (cornerIndex) {
       case 0: newQuad = Quadrilateral(topLeft: visionPoint, topRight: _quad.topRight, bottomLeft: _quad.bottomLeft, bottomRight: _quad.bottomRight); break;
       case 1: newQuad = Quadrilateral(topLeft: _quad.topLeft, topRight: visionPoint, bottomLeft: _quad.bottomLeft, bottomRight: _quad.bottomRight); break;
       case 2: newQuad = Quadrilateral(topLeft: _quad.topLeft, topRight: _quad.topRight, bottomLeft: _quad.bottomLeft, bottomRight: visionPoint); break;
@@ -549,9 +559,13 @@ class _CropEditorState extends State<CropEditor> {
 
     setState(() {
       _quad = newQuad;
+      _dragPosition = localPosition;
+      _draggingCornerIndex = cornerIndex;
+      _showMagnifier = true;
     });
     widget.onQuadChanged(newQuad);
   }
+
 
   void _onPanEnd(DragEndDetails details) {
     setState(() {
@@ -576,9 +590,9 @@ class _CropEditorState extends State<CropEditor> {
               final containerSize = constraints.biggest;
               return Stack(
                 fit: StackFit.expand,
-                clipBehavior: Clip.none,
+                clipBehavior: Clip.none, // Permette alla lente di uscire
                 children: [
-                  Image.file(File(widget.imagePath)),
+                  Image.file(File(widget.imagePath), fit: BoxFit.contain),
                   CustomPaint(painter: CropPainter(_quad), size: Size.infinite),
                   GestureDetector(
                     onPanStart: (details) => _onPanStart(details, containerSize),
@@ -597,20 +611,44 @@ class _CropEditorState extends State<CropEditor> {
     );
   }
 
-  // **MODIFICATO**: Logica della lente d'ingrandimento corretta
-  Widget _buildMagnifier(Size containerSize) {
+  /// ===================================================================
+  /// LENTE D'INGRANDIMENTO CON LOGICA DEFINITIVA
+  /// ===================================================================
+  Widget _buildMagnifier(Size imageContainerSize) {
     const double magnifierSize = 120;
     const double zoomFactor = 2.0;
+    const double verticalOffset = 40.0; // Spazio tra il dito e la lente
 
-    final Offset magnifierPosition = Offset(
-      _dragPosition.dx - magnifierSize / 2 - 80,
-      _dragPosition.dy - magnifierSize / 2 - 80,
+    if (_draggingCornerIndex == null) return const SizedBox.shrink();
+
+    // **NUOVA LOGICA DI POSIZIONAMENTO**
+    // Dimensioni e offset del contenitore dell'immagine rispetto al body
+    final scaffoldBodySize = widget.scaffoldBodyConstraints.biggest;
+    final offsetInScaffold = Offset(
+      (scaffoldBodySize.width - imageContainerSize.width) / 2,
+      (scaffoldBodySize.height - imageContainerSize.height) / 2,
     );
 
-    final Offset contentOffset = Offset(
-        (magnifierSize / 2) - (_dragPosition.dx * zoomFactor),
-        (magnifierSize / 2) - (_dragPosition.dy * zoomFactor)
-    );
+    // Prova a posizionare la lente sopra il dito.
+    double magnifierTop = _dragPosition.dy - magnifierSize - verticalOffset;
+
+    // Se non c'è abbastanza spazio sopra (considerando l'offset), la posiziona sotto.
+    if (magnifierTop + offsetInScaffold.dy < 0) {
+      magnifierTop = _dragPosition.dy + verticalOffset;
+    }
+
+    // Calcola la posizione finale e la blocca entro i limiti del body
+    final finalLeft = (_dragPosition.dx - magnifierSize / 2 + offsetInScaffold.dx)
+        .clamp(0.0, scaffoldBodySize.width - magnifierSize) - offsetInScaffold.dx;
+
+    final finalTop = (magnifierTop + offsetInScaffold.dy)
+        .clamp(0.0, scaffoldBodySize.height - magnifierSize) - offsetInScaffold.dy;
+
+    final magnifierPosition = Offset(finalLeft, finalTop);
+
+    // Posizione del contenuto zoomato all'interno della lente.
+    final contentLeft = magnifierSize / 2 - _dragPosition.dx * zoomFactor;
+    final contentTop = magnifierSize / 2 - _dragPosition.dy * zoomFactor;
 
     return Positioned(
       left: magnifierPosition.dx,
@@ -621,30 +659,60 @@ class _CropEditorState extends State<CropEditor> {
           height: magnifierSize,
           decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.blue, width: 3),
-              color: Colors.white,
+              border: Border.all(color: Colors.blue, width: 2),
+              color: Theme.of(context).scaffoldBackgroundColor,
               boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 4))]
           ),
-          clipBehavior: Clip.antiAlias,
-          child: Transform.scale(
-            scale: zoomFactor,
-            child: Transform.translate(
-              offset: contentOffset,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Image.file(
-                    File(widget.imagePath),
-                    fit: BoxFit.cover,
-                    width: containerSize.width,
-                    height: containerSize.height,
+          child: ClipOval(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Contenuto zoomato e traslato
+                Positioned(
+                  left: contentLeft,
+                  top: contentTop,
+                  child: Transform.scale(
+                    scale: zoomFactor,
+                    alignment: Alignment.topLeft,
+                    child: SizedBox(
+                      width: imageContainerSize.width,
+                      height: imageContainerSize.height,
+                      child: Stack(
+                        children: [
+                          Image.file(
+                            File(widget.imagePath),
+                            fit: BoxFit.contain,
+                            alignment: Alignment.topLeft,
+                          ),
+                          CustomPaint(
+                            size: imageContainerSize,
+                            painter: CropPainter(_quad),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  CustomPaint(
-                    painter: CropPainter(_quad),
-                    size: containerSize,
+                ),
+                // Mirino
+                Container(
+                  width: magnifierSize,
+                  height: 1.5,
+                  color: Colors.blue.withOpacity(0.7),
+                ),
+                Container(
+                  width: 1.5,
+                  height: magnifierSize,
+                  color: Colors.blue.withOpacity(0.7),
+                ),
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.blue, width: 1.5)
                   ),
-                ],
-              ),
+                )
+              ],
             ),
           ),
         ),
@@ -695,6 +763,10 @@ class _CropEditorState extends State<CropEditor> {
     });
   }
 }
+
+// --------------------------------------------------
+// 6. WIDGET AUSILIARI (CropPainter, ImageDetailPage)
+// --------------------------------------------------
 
 class CropPainter extends CustomPainter {
   final Quadrilateral quad;
