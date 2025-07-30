@@ -143,7 +143,6 @@ class DocScanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
     }
 
-    // **MODIFICATO**: Algoritmo di rilevamento bordi migliorato
     private fun detectEdges(imagePath: String, result: MethodChannel.Result) {
         coroutineScope.launch {
             val bitmap = BitmapFactory.decodeFile(imagePath)
@@ -154,44 +153,38 @@ class DocScanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             val originalMat = Mat()
             Utils.bitmapToMat(bitmap, originalMat)
 
-            // 1. Ridimensiona per performance e riduzione del rumore
             val ratio = originalMat.height() / 500.0
             val resizedMat = Mat()
             Imgproc.resize(originalMat, resizedMat, Size(originalMat.width() / ratio, 500.0))
 
-            // 2. Pre-elaborazione: RGBA -> Grigio -> Filtro Bilaterale (preserva i bordi)
             val grayMat = Mat()
-            Imgproc.cvtColor(resizedMat, grayMat, Imgproc.COLOR_RGBA2GRAY) // Correzione: RGBA a Grigio
+            Imgproc.cvtColor(resizedMat, grayMat, Imgproc.COLOR_RGBA2GRAY)
             val blurredMat = Mat()
             Imgproc.bilateralFilter(grayMat, blurredMat, 9, 75.0, 75.0)
 
-            // 3. Rilevamento Bordi Canny
             val edgesMat = Mat()
             Imgproc.Canny(blurredMat, edgesMat, 75.0, 200.0)
 
-            // 4. Operazione di "Closing" per unire i bordi spezzati
             val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(7.0, 7.0))
             val closedMat = Mat()
             Imgproc.morphologyEx(edgesMat, closedMat, Imgproc.MORPH_CLOSE, kernel, Point(-1.0, -1.0), 2)
 
-            // 5. Trova i contorni
             val contours = ArrayList<MatOfPoint>()
             val hierarchy = Mat()
             Imgproc.findContours(closedMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
 
-            // 6. Trova il quadrilatero più grande e valido
             var largestContour: MatOfPoint? = null
             var maxArea = 0.0
             val totalImageArea = resizedMat.size().area()
 
             for (contour in contours) {
                 val area = Imgproc.contourArea(contour)
-                if (area < totalImageArea * 0.04) continue // Filtro area minima
+                if (area < totalImageArea * 0.04) continue
 
                 val approxCurve = MatOfPoint2f()
                 val contour2f = MatOfPoint2f(*contour.toArray())
                 val peri = Imgproc.arcLength(contour2f, true)
-                Imgproc.approxPolyDP(contour2f, approxCurve, 0.01 * peri, true) // Tolleranza ridotta
+                Imgproc.approxPolyDP(contour2f, approxCurve, 0.01 * peri, true)
 
                 if (approxCurve.total() == 4L && Imgproc.isContourConvex(MatOfPoint(*approxCurve.toArray()))) {
                     if (area > maxArea) {
@@ -203,7 +196,6 @@ class DocScanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
             val quad: Map<String, Double>
             if (largestContour != null) {
-                // Riporta le coordinate alle dimensioni originali
                 val points = largestContour.toArray().map { Point(it.x * ratio / originalMat.width(), 1 - (it.y * ratio / originalMat.height())) }
                 val sortedPoints = sortPoints(points)
                 val quadrilateral = Quadrilateral(
@@ -298,62 +290,43 @@ class DocScanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private fun applyFilter(bitmap: Bitmap, filterName: String, brightness: Double?, contrast: Double?, threshold: Double?): Bitmap {
-        val paint = Paint()
+        val mat = Mat()
+        Utils.bitmapToMat(bitmap, mat)
+
+        if (filterName != "none") {
+            Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
+        }
+
         when (filterName) {
-            "grayscale" -> {
-                val matrix = ColorMatrix().apply { setSaturation(0f) }
-                paint.colorFilter = ColorMatrixColorFilter(matrix)
-            }
             "blackAndWhite" -> {
-                val matrix = ColorMatrix().apply {
-                    setSaturation(0f)
-                    val scale = 1.5f
-                    val translate = (-0.5f * scale + 0.5f) * 255f
-                    postConcat(ColorMatrix(floatArrayOf(
-                        scale, 0f, 0f, 0f, translate,
-                        0f, scale, 0f, 0f, translate,
-                        0f, 0f, scale, 0f, translate,
-                        0f, 0f, 0f, 1f, 0f
-                    )))
-                }
-                paint.colorFilter = ColorMatrixColorFilter(matrix)
+                mat.convertTo(mat, -1, 1.5, (1.0 - 1.5) * 127)
             }
             "custom" -> {
-                val matrix = ColorMatrix()
+                var b = 0.0
+                var c = 1.0
                 if (brightness != null) {
-                    matrix.postConcat(ColorMatrix(floatArrayOf(
-                        1f, 0f, 0f, 0f, brightness.toFloat(),
-                        0f, 1f, 0f, 0f, brightness.toFloat(),
-                        0f, 0f, 1f, 0f, brightness.toFloat(),
-                        0f, 0f, 0f, 1f, 0f
-                    )))
+                    b = (brightness / 100.0) * 127.0
                 }
                 if (contrast != null) {
-                    val scale = contrast.toFloat()
-                    val translate = (-0.5f * scale + 0.5f) * 255f
-                    matrix.postConcat(ColorMatrix(floatArrayOf(
-                        scale, 0f, 0f, 0f, translate,
-                        0f, scale, 0f, 0f, translate,
-                        0f, 0f, scale, 0f, translate,
-                        0f, 0f, 0f, 1f, 0f
-                    )))
+                    c = contrast
                 }
-                paint.colorFilter = ColorMatrixColorFilter(matrix)
+                mat.convertTo(mat, -1, c, b)
+
+                if (threshold != null) {
+                    // **CORREZIONE**: Limita il valore massimo della soglia per evitare un'immagine nera
+                    val threshValue = (threshold * 255).coerceAtMost(254.0)
+                    Imgproc.threshold(mat, mat, threshValue, 255.0, Imgproc.THRESH_BINARY)
+                }
             }
         }
 
-        val resultBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(resultBitmap)
-        canvas.drawBitmap(bitmap, 0f, 0f, paint)
-
-        if (filterName == "custom" && threshold != null) {
-            val mat = Mat()
-            Utils.bitmapToMat(resultBitmap, mat)
-            Imgproc.cvtColor(mat, mat, Imgproc.COLOR_BGR2GRAY)
-            Imgproc.threshold(mat, mat, threshold * 255, 255.0, Imgproc.THRESH_BINARY)
-            Utils.matToBitmap(mat, resultBitmap)
-            mat.release()
+        if (mat.channels() == 1) {
+            Imgproc.cvtColor(mat, mat, Imgproc.COLOR_GRAY2RGBA)
         }
+
+        val resultBitmap = Bitmap.createBitmap(mat.cols(), mat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(mat, resultBitmap)
+        mat.release()
 
         return resultBitmap
     }
