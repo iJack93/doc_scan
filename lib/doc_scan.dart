@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -93,7 +94,7 @@ import 'package:flutter/services.dart';
 enum DocScanFormat { pdf, jpeg }
 
 /// Filtri colore applicabili all'immagine.
-enum DocScanFilter { none, grayscale, blackAndWhite, custom }
+enum DocScanFilter { none, grayscale, blackAndWhite, custom, automatic, color, shadows }
 
 /// Eccezione sollevata durante le operazioni di scansione.
 class DocumentScannerException implements Exception {
@@ -104,7 +105,7 @@ class DocumentScannerException implements Exception {
 }
 
 /// Rappresenta le coordinate normalizzate (0-1) dei quattro angoli di un documento.
-class Quadrilateral {
+class Quadrilateral extends Equatable {
   final Offset topLeft;
   final Offset topRight;
   final Offset bottomLeft;
@@ -134,10 +135,19 @@ class Quadrilateral {
       'bottomRightX': bottomRight.dx, 'bottomRightY': bottomRight.dy,
     };
   }
+
+  @override
+  // TODO: implement props
+  List<Object?> get props => [
+    topLeft,
+    topRight,
+    bottomLeft,
+    bottomRight,
+  ];
 }
 
 /// Classe principale per interagire con il motore di scansione nativo.
-class DocumentScanner {
+class DocumentScannerManager {
   static const MethodChannel _channel = MethodChannel('doc_scan');
 
   /// 1. Ottiene un'immagine dalla fotocamera o dalla galleria.

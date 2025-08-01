@@ -46,7 +46,7 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
             }
             let brightness = args["brightness"] as? Double
             let contrast = args["contrast"] as? Double
-            let threshold = args["threshold"] as? Double // **NUOVO**: Parametro per la soglia B&N
+            let threshold = args["threshold"] as? Double
 
             applyCropAndSave(imagePath: imagePath, quadValues: quadValues, format: format, filter: filter, brightness: brightness, contrast: contrast, threshold: threshold)
 
@@ -175,7 +175,6 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
         }
         ciImage = perspectiveCorrectedImage
 
-        // Applica il filtro colore
         let filteredImage = applyFilter(filterName, to: ciImage, brightness: brightness, contrast: contrast, threshold: threshold)
 
         if let finalCgImage = CIContext().createCGImage(filteredImage, from: filteredImage.extent) {
@@ -189,6 +188,73 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
         var outputImage = ciImage
 
         switch filterName {
+        case "automatic":
+            // Nuova logica basata sull'idea dell'utente:
+            // 1. Applica un filtro di binarizzazione (simile a "shadows").
+            // 2. Rendi il risultato più scuro per preservare i dettagli.
+
+            var workingImage = outputImage
+
+            // --- PASSO 1: Converti in scala di grigi ---
+            guard let grayscaleFilter = CIFilter(name: "CIPhotoEffectNoir", parameters: [kCIInputImageKey: workingImage]),
+                  let grayscaleImage = grayscaleFilter.outputImage else {
+                return outputImage
+            }
+
+            // --- PASSO 2: Crea l'immagine di soglia locale (versione sfocata) ---
+            // Questa immagine rappresenta la luminosità media di ogni area.
+            guard let blurFilter = CIFilter(name: "CIGaussianBlur", parameters: [
+                kCIInputImageKey: grayscaleImage,
+                kCIInputRadiusKey: 35.0 // Un raggio grande per una media locale efficace
+            ]), let blurredImage = blurFilter.outputImage else {
+                return outputImage
+            }
+
+            // --- PASSO 3: Applica la Binarizzazione Adattiva tramite un CIKernel custom ---
+            // Questo kernel confronta ogni pixel con la sua soglia locale (il valore dal blur).
+            let kernelSource = """
+            kernel vec4 adaptiveThreshold(sampler image, sampler blurredImage, float c_value) {
+                vec4 pixel = sample(image, samplerCoord(image));
+                vec4 blurred_pixel = sample(blurredImage, samplerCoord(blurredImage));
+
+                // Calcoliamo la luminanza (luminosità) di entrambi i pixel.
+                float image_luma = dot(pixel.rgb, vec3(0.2126, 0.7152, 0.0722));
+                float blurred_luma = dot(blurred_pixel.rgb, vec3(0.2126, 0.7152, 0.0722));
+
+                // La condizione della soglia adattiva:
+                // se il pixel originale è più chiaro della sua media locale meno una costante,
+                // allora diventa bianco, altrimenti nero.
+                if (image_luma > blurred_luma - c_value) {
+                    return vec4(1.0, 1.0, 1.0, 1.0);
+                } else {
+                    return vec4(0.0, 0.0, 0.0, 1.0);
+                }
+            }
+            """
+
+            guard let adaptiveKernel = CIKernel(source: kernelSource) else {
+                return outputImage
+            }
+
+            // La costante 'C' di OpenCV, normalizzata. Un piccolo valore positivo
+            // aiuta a pulire lo sfondo senza eliminare il testo.
+            let c_value: CGFloat = 0.06
+
+            let extent = workingImage.extent
+            let arguments: [Any] = [grayscaleImage, blurredImage, c_value]
+
+            guard let finalImage = adaptiveKernel.apply(
+                extent: extent,
+                roiCallback: { index, rect in
+                    return rect
+                },
+                arguments: arguments
+            ) else {
+                return outputImage
+            }
+
+            outputImage = finalImage
+
         case "grayscale":
             if let filter = CIFilter(name: "CIPhotoEffectNoir") {
                 filter.setValue(outputImage, forKey: kCIInputImageKey)
@@ -201,6 +267,13 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
                 filter.setValue(1.5, forKey: kCIInputContrastKey)
                 outputImage = filter.outputImage ?? outputImage
             }
+        case "shadows":
+             if let monoFilter = CIFilter(name: "CIColorMonochrome") {
+                monoFilter.setValue(outputImage, forKey: kCIInputImageKey)
+                monoFilter.setValue(CIColor.white, forKey: kCIInputColorKey)
+                monoFilter.setValue(0.8, forKey: kCIInputIntensityKey)
+                outputImage = monoFilter.outputImage ?? outputImage
+            }
         case "custom":
              if let filter = CIFilter(name: "CIColorControls") {
                 filter.setValue(outputImage, forKey: kCIInputImageKey)
@@ -212,7 +285,6 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
                 }
                 outputImage = filter.outputImage ?? outputImage
             }
-            // **NUOVO**: Applica il filtro monocromatico se è stato fornito un valore di soglia
             if let t = threshold {
                 if let monoFilter = CIFilter(name: "CIColorMonochrome") {
                     monoFilter.setValue(outputImage, forKey: kCIInputImageKey)
@@ -221,7 +293,7 @@ public class DocScanPlugin: NSObject, FlutterPlugin, VNDocumentCameraViewControl
                     outputImage = monoFilter.outputImage ?? outputImage
                 }
             }
-        default: // "none"
+        default: // "none", "color"
             break
         }
         return outputImage

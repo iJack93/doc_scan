@@ -1,8 +1,12 @@
 PODS:
+  - camera_avfoundation (0.0.1):
+    - Flutter
   - doc_scan_flutter (1.0.0):
     - Flutter
   - Flutter (1.0.0)
   - flutter_exif_rotation (0.3.0):
+    - Flutter
+  - google_mlkit_document_scanner (0.4.0):
     - Flutter
   - image_picker_ios (0.0.1):
     - Flutter
@@ -10,37 +14,52 @@ PODS:
     - Flutter
   - open_file_ios (0.0.1):
     - Flutter
+  - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
 
 DEPENDENCIES:
+  - camera_avfoundation (from `.symlinks/plugins/camera_avfoundation/ios`)
   - doc_scan_flutter (from `.symlinks/plugins/doc_scan_flutter/ios`)
   - Flutter (from `Flutter`)
   - flutter_exif_rotation (from `.symlinks/plugins/flutter_exif_rotation/ios`)
+  - google_mlkit_document_scanner (from `.symlinks/plugins/google_mlkit_document_scanner/ios`)
   - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
   - integration_test (from `.symlinks/plugins/integration_test/ios`)
   - open_file_ios (from `.symlinks/plugins/open_file_ios/ios`)
+  - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
 
 EXTERNAL SOURCES:
+  camera_avfoundation:
+    :path: ".symlinks/plugins/camera_avfoundation/ios"
   doc_scan_flutter:
     :path: ".symlinks/plugins/doc_scan_flutter/ios"
   Flutter:
     :path: Flutter
   flutter_exif_rotation:
     :path: ".symlinks/plugins/flutter_exif_rotation/ios"
+  google_mlkit_document_scanner:
+    :path: ".symlinks/plugins/google_mlkit_document_scanner/ios"
   image_picker_ios:
     :path: ".symlinks/plugins/image_picker_ios/ios"
   integration_test:
     :path: ".symlinks/plugins/integration_test/ios"
   open_file_ios:
     :path: ".symlinks/plugins/open_file_ios/ios"
+  path_provider_foundation:
+    :path: ".symlinks/plugins/path_provider_foundation/darwin"
 
 SPEC CHECKSUMS:
+  camera_avfoundation: be3be85408cd4126f250386828e9b1dfa40ab436
   doc_scan_flutter: d0271acc6b4e826e9498352c9f10f39408addf8b
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
   flutter_exif_rotation: 5406455759acacf1f7b1b83e85dbb545340d6e9c
+  google_mlkit_document_scanner: b17fc45e9f935d88d6a8a7898dd169ffb680b8f4
   image_picker_ios: 7fe1ff8e34c1790d6fff70a32484959f563a928a
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
   open_file_ios: 5ff7526df64e4394b4fe207636b67a95e83078bb
+  path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
 
-PODFILE CHECKSUM: 45051f8f5d22892b0cc668c7b17779d61c34d6e2
+PODFILE CHECKSUM: ee333afca9b816c6475b37b8959fa83f1cde5be5
 
 COCOAPODS: 1.16.2

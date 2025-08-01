@@ -6,27 +6,50 @@ import 'package:doc_scan_flutter/doc_scan.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_exif_rotation/flutter_exif_rotation.dart';
+import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart' as mlkit;
 import 'package:image_picker/image_picker.dart';
 import 'package:open_file/open_file.dart';
 import 'package:photo_view/photo_view.dart';
+// **MODIFICATO**: Importa il pacchetto 'path' con un prefisso per evitare conflitti.
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
-// Prima di eseguire, aggiungi le dipendenze al tuo pubspec.yaml:
-// flutter pub add open_file
-// flutter
+// --------------------------------------------------
+// WIDGET PRINCIPALE E PAGINA INIZIALE
+// --------------------------------------------------
 
 void main() => runApp(const MyApp());
-
-// --------------------------------------------------
-// 1. WIDGET PRINCIPALE E PAGINA INIZIALE
-// --------------------------------------------------
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: DocScanPage(),
+      theme: ThemeData.dark().copyWith(
+          primaryColor: Colors.blue,
+          scaffoldBackgroundColor: const Color(0xFF121212),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFF1F1F1F),
+            elevation: 0,
+            centerTitle: false,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFa8c7fa), // Colore azzurro
+              foregroundColor: Colors.black, // Testo scuro
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24), // Molto arrotondato
+              ),
+            ),
+          ),
+          textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+              )
+          )
+      ),
+      home: const DocScanPage(),
     );
   }
 }
@@ -38,11 +61,9 @@ class DocScanPage extends StatefulWidget {
 }
 
 class _DocScanPageState extends State<DocScanPage> {
-  final DocScanFormat _format = DocScanFormat.jpeg;
   List<String> _finalFilePaths = [];
   String? _errorMessage;
   bool _isLoading = false;
-
   final ImagePicker _picker = ImagePicker();
 
   Future<void> _startScanProcess(String source) async {
@@ -54,17 +75,38 @@ class _DocScanPageState extends State<DocScanPage> {
 
     try {
       String? tempImagePath;
-      if(Platform.isIOS) {
-        tempImagePath = await DocumentScanner.getImage(source: source);
-      } else if(Platform.isAndroid) {
-        final XFile? pickedFile = await _picker.pickImage(source: source == "gallery" ? ImageSource.gallery : ImageSource.camera, imageQuality: 80);
-        if (pickedFile == null) {
+      List<String> resultPaths = [];
+
+      if (Platform.isAndroid && source == 'camera') {
+        final options = mlkit.DocumentScannerOptions(
+          documentFormat: mlkit.DocumentFormat.jpeg,
+          mode: mlkit.ScannerMode.filter,
+          pageLimit: 5,
+          isGalleryImport: false,
+        );
+        final documentScanner = mlkit.DocumentScanner(options: options);
+        final mlkit.DocumentScanningResult result = await documentScanner.scanDocument();
+        resultPaths = result.images;
+
+        if (resultPaths.isNotEmpty) {
+          tempImagePath = resultPaths.first;
+        } else {
           setState(() => _isLoading = false);
           return;
         }
-        final image = await FlutterExifRotation.rotateImage(path: pickedFile.path);
-        tempImagePath = image.path;
+
+      } else {
+        if (Platform.isAndroid && source == 'gallery') {
+          final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+          if (pickedFile != null) {
+            final File rotatedImage = await FlutterExifRotation.rotateImage(path: pickedFile.path);
+            tempImagePath = rotatedImage.path;
+          }
+        } else if (Platform.isIOS) {
+          tempImagePath = await DocumentScannerManager.getImage(source: source);
+        }
       }
+
       if (tempImagePath == null) {
         setState(() => _isLoading = false);
         return;
@@ -75,7 +117,7 @@ class _DocScanPageState extends State<DocScanPage> {
         MaterialPageRoute(
           builder: (context) => PreviewPage(
             originalImagePath: tempImagePath!,
-            format: _format,
+            format: DocScanFormat.pdf,
           ),
         ),
       );
@@ -83,6 +125,7 @@ class _DocScanPageState extends State<DocScanPage> {
       if (finalPath != null) {
         setState(() => _finalFilePaths = [finalPath]);
       }
+
     } on PlatformException catch (e) {
       setState(() => _errorMessage = e.message ?? 'Errore sconosciuto');
     } finally {
@@ -148,10 +191,6 @@ class _DocScanPageState extends State<DocScanPage> {
   }
 }
 
-// --------------------------------------------------
-// 2. PAGINA DI ANTEPRIMA (PreviewPage)
-// --------------------------------------------------
-
 class PreviewPage extends StatefulWidget {
   final String originalImagePath;
   final DocScanFormat format;
@@ -163,13 +202,15 @@ class PreviewPage extends StatefulWidget {
 
 class _PreviewPageState extends State<PreviewPage> {
   Quadrilateral? _quad;
-  DocScanFilter _filter = DocScanFilter.blackAndWhite;
+  DocScanFilter _filter = DocScanFilter.shadows; // Default a Ombre
   String? _previewImagePath;
   String? _errorMessage;
+  bool _isProcessing = true;
+  // Parametri non più usati dalla UI ma necessari per la chiamata
   bool _isCustomizing = false;
   double _brightness = 0.0;
   double _contrast = 1.0;
-  double _threshold = 1.0; // **NUOVO**: Stato per la soglia B&N
+  double _threshold = 1.0;
 
   @override
   void initState() {
@@ -179,37 +220,46 @@ class _PreviewPageState extends State<PreviewPage> {
 
   Future<void> _initialize() async {
     try {
-      _quad = await DocumentScanner.detectEdges(widget.originalImagePath);
+      _quad = await DocumentScannerManager.detectEdges(widget.originalImagePath);
       if (_quad != null) {
         await _regeneratePreview();
       } else {
-        setState(() => _errorMessage = "Nessun documento rilevato.");
+        setState(() {
+          _errorMessage = "Nessun documento rilevato.";
+          _isProcessing = false;
+        });
       }
     } on PlatformException catch (e) {
-      setState(() => _errorMessage = e.message);
+      setState(() {
+        _errorMessage = e.message;
+        _isProcessing = false;
+      });
     }
   }
 
   Future<void> _regeneratePreview() async {
     if (_quad == null) return;
-    setState(() {
-      _previewImagePath = null; // Mostra il loader
-    });
+    setState(() => _isProcessing = true);
     try {
-      final newPreviewPath = await DocumentScanner.applyCropAndSave(
+      final newPreviewPath = await DocumentScannerManager.applyCropAndSave(
         imagePath: widget.originalImagePath,
         quad: _quad!,
-        format: DocScanFormat.jpeg, // L'anteprima è sempre jpeg
-        filter: _isCustomizing ? DocScanFilter.custom : _filter,
-        brightness: _isCustomizing ? _brightness : null,
-        contrast: _isCustomizing ? _contrast : null,
-        threshold: _isCustomizing ? _threshold : null, // **NUOVO**
+        format: DocScanFormat.jpeg,
+        filter: _filter,
       );
-      setState(() {
-        _previewImagePath = newPreviewPath;
-      });
+      if (mounted) {
+        setState(() {
+          _previewImagePath = newPreviewPath;
+          _isProcessing = false;
+        });
+      }
     } on PlatformException catch (e) {
-      setState(() => _errorMessage = e.message);
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.message;
+          _isProcessing = false;
+        });
+      }
     }
   }
 
@@ -242,17 +292,17 @@ class _PreviewPageState extends State<PreviewPage> {
           isCustomizing: _isCustomizing,
           initialBrightness: _brightness,
           initialContrast: _contrast,
-          initialThreshold: _threshold, // **NUOVO**
+          initialThreshold: _threshold,
         ),
       ),
     );
     if (result != null) {
       setState(() {
-        _isCustomizing = result['isCustomizing'] as bool;
         _filter = result['filter'] as DocScanFilter;
+        _isCustomizing = result['isCustomizing'] as bool;
         _brightness = result['brightness'] as double;
         _contrast = result['contrast'] as double;
-        _threshold = result['threshold'] as double; // **NUOVO**
+        _threshold = result['threshold'] as double;
       });
       await _regeneratePreview();
     }
@@ -260,67 +310,148 @@ class _PreviewPageState extends State<PreviewPage> {
 
   Future<void> _onSave() async {
     if (_quad == null) return;
-    final finalPath = await DocumentScanner.applyCropAndSave(
+    setState(() => _isProcessing = true);
+    final finalPath = await DocumentScannerManager.applyCropAndSave(
       imagePath: widget.originalImagePath,
       quad: _quad!,
       format: widget.format,
-      filter: _isCustomizing ? DocScanFilter.custom : _filter,
-      brightness: _isCustomizing ? _brightness : null,
-      contrast: _isCustomizing ? _contrast : null,
-      threshold: _isCustomizing ? _threshold : null, // **NUOVO**
+      filter: _filter,
     );
     if (mounted) Navigator.pop(context, finalPath);
   }
 
+  Future<bool> _onWillPop() async {
+    return (await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Annullare la scansione?'),
+        content: const Text('Se esci, tutte le modifiche andranno perse.'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Esci', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    )) ?? false;
+  }
+
+  void _deleteScan() => Navigator.of(context).pop();
+  void _rescan() => Navigator.of(context).pop();
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Anteprima Documento"),
-        actions: [IconButton(icon: const Icon(Icons.check), onPressed: _previewImagePath == null ? null : _onSave)],
+    return Theme(
+      data: ThemeData.dark().copyWith(
+          primaryColor: Colors.blue,
+          scaffoldBackgroundColor: const Color(0xFF121212),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFF1F1F1F),
+            elevation: 0,
+            centerTitle: false,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFa8c7fa),
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            ),
+          ),
+          textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(foregroundColor: Colors.white))
       ),
-      body: _errorMessage != null
-          ? Center(child: Text("Errore: $_errorMessage!", style: const TextStyle(color: Colors.red)))
-          : _previewImagePath == null
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-        children: [
-          Expanded(child: Center(child: Image.file(File(_previewImagePath!)))),
-          _buildBottomBar(),
-        ],
+      child: WillPopScope(
+        onWillPop: _onWillPop,
+        child: Scaffold(
+          appBar: AppBar(
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () async {
+                if (await _onWillPop()) {
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+            title: const Text("Anteprima"),
+            actions: [
+              Container(
+                margin: const EdgeInsets.only(right: 16),
+                child: ElevatedButton(
+                  onPressed: _previewImagePath == null ? null : _onSave,
+                  child: const Text("Fine"),
+                ),
+              )
+            ],
+          ),
+          body: _errorMessage != null
+              ? Center(child: Text("Errore: $_errorMessage!", style: const TextStyle(color: Colors.red)))
+              : _isProcessing
+              ? const Center(child: CircularProgressIndicator())
+              : Column(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: PhotoView(
+                    imageProvider: FileImage(File(_previewImagePath!)),
+                    backgroundDecoration: const BoxDecoration(color: Colors.transparent),
+                    minScale: PhotoViewComputedScale.contained,
+                  ),
+                ),
+              ),
+              _buildBottomBar(),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildBottomBar() {
     return Container(
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
+      height: 100,
+      decoration: BoxDecoration(color: Theme.of(context).appBarTheme.backgroundColor),
+      child: SizedBox(
+        height: 80,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          children: [
+            _buildToolButton(Icons.crop_rotate, "Ritaglia e ruota", _editCrop),
+            const SizedBox(width: 24),
+            _buildToolButton(Icons.auto_fix_high, "Filtro", _editFilter),
+            const SizedBox(width: 24),
+            _buildToolButton(Icons.add_a_photo_outlined, "Nuovo scatto", _rescan),
+            const SizedBox(width: 24),
+            _buildToolButton(Icons.delete_outline, "Elimina", _deleteScan),
+          ],
+        ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          TextButton.icon(
-            onPressed: _editCrop,
-            icon: const Icon(Icons.crop),
-            label: const Text("Ritaglia"),
-          ),
-          TextButton.icon(
-            onPressed: _editFilter,
-            icon: const Icon(Icons.filter_vintage_outlined),
-            label: const Text("Filtri"),
-          ),
-        ],
+    );
+  }
+
+  Widget _buildToolButton(IconData icon, String label, VoidCallback onPressed) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(fontSize: 12, color: Colors.white)),
+          ],
+        ),
       ),
     );
   }
 }
-
-// --------------------------------------------------
-// 3. PAGINA DI RITAGLIO (CropPage)
-// --------------------------------------------------
 
 class CropPage extends StatefulWidget {
   final String imagePath;
@@ -333,6 +464,7 @@ class CropPage extends StatefulWidget {
 
 class _CropPageState extends State<CropPage> {
   late Quadrilateral _quad;
+  bool _isDetecting = false;
 
   @override
   void initState() {
@@ -340,37 +472,136 @@ class _CropPageState extends State<CropPage> {
     _quad = widget.initialQuad;
   }
 
+  Future<void> _resetToAutoCrop() async {
+    setState(() => _isDetecting = true);
+    try {
+      final newQuad = await DocumentScannerManager.detectEdges(widget.imagePath);
+      if (newQuad != null && mounted) {
+        setState(() => _quad = newQuad);
+      }
+    } on PlatformException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Errore rilevamento bordi: ${e.message}')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDetecting = false);
+      }
+    }
+  }
+
+  void _resetToFullCrop() {
+    setState(() {
+      _quad = Quadrilateral(
+        topLeft: const Offset(0, 1),
+        topRight: const Offset(1, 1),
+        bottomLeft: const Offset(0, 0),
+        bottomRight: const Offset(1, 0),
+      );
+    });
+  }
+
+  void _rotateCrop() {
+    setState(() {
+      _quad = Quadrilateral(
+        topLeft: _quad.bottomLeft,
+        topRight: _quad.topLeft,
+        bottomRight: _quad.topRight,
+        bottomLeft: _quad.bottomRight,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Modifica Bordi"),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.check),
-            onPressed: () => Navigator.pop(context, _quad),
-          )
+      appBar: AppBar(title: const Text("Ritaglia e ruota")),
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return CropEditor(
+                      imagePath: widget.imagePath,
+                      initialQuad: _quad,
+                      onQuadChanged: (newQuad) {
+                        if (!_isDetecting) _quad = newQuad;
+                      },
+                      scaffoldBodyConstraints: constraints,
+                    );
+                  },
+                ),
+              ),
+              _buildBottomBar(),
+            ],
+          ),
+          if (_isDetecting)
+            Container(
+              color: Colors.black.withOpacity(0.5),
+              child: const Center(child: CircularProgressIndicator()),
+            ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return CropEditor(
-            imagePath: widget.imagePath,
-            initialQuad: _quad,
-            onQuadChanged: (newQuad) {
-              _quad = newQuad;
-            },
-            scaffoldBodyConstraints: constraints,
-          );
-        },
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                _buildToolButton(Icons.crop_free, "Ritaglia automatico", _isDetecting ? null : _resetToAutoCrop),
+                const SizedBox(width: 28),
+                _buildToolButton(Icons.fullscreen, "Nessun ritaglio", _isDetecting ? null : _resetToFullCrop),
+                const SizedBox(width: 28),
+                _buildToolButton(Icons.rotate_90_degrees_ccw_outlined, "Ruota", _isDetecting ? null : _rotateCrop),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                ElevatedButton(
+                  onPressed: _isDetecting ? null : () => Navigator.pop(context, _quad),
+                  child: const Text("Applica"),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolButton(IconData icon, String label, VoidCallback? onPressed) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(8),
+      child: Opacity(
+        opacity: onPressed == null ? 0.5 : 1.0,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white),
+              const SizedBox(height: 8),
+              Text(label, style: const TextStyle(fontSize: 12, color: Colors.white)),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
-
-// --------------------------------------------------
-// 4. PAGINA DEI FILTRI (FilterPage)
-// --------------------------------------------------
 
 class FilterPage extends StatefulWidget {
   final String originalImagePath;
@@ -379,7 +610,7 @@ class FilterPage extends StatefulWidget {
   final bool isCustomizing;
   final double initialBrightness;
   final double initialContrast;
-  final double initialThreshold; // **NUOVO**
+  final double initialThreshold;
 
   const FilterPage({
     super.key,
@@ -389,7 +620,7 @@ class FilterPage extends StatefulWidget {
     required this.isCustomizing,
     required this.initialBrightness,
     required this.initialContrast,
-    required this.initialThreshold, // **NUOVO**
+    required this.initialThreshold,
   });
 
   @override
@@ -397,141 +628,69 @@ class FilterPage extends StatefulWidget {
 }
 
 class _FilterPageState extends State<FilterPage> {
-  late DocScanFilter _selectedFilter;
+  late int _selectedFilterIndex;
   String? _previewImagePath;
   bool _isRendering = true;
 
-  late bool _isCustomizing;
-  late double _brightness;
-  late double _contrast;
-  late double _threshold; // **NUOVO**
-
-  Timer? _debounce;
+  final List<Map<String, dynamic>> _filters = [
+    {'name': 'Nessuno', 'icon': Icons.block, 'filter': DocScanFilter.none},
+    {'name': 'Automatico', 'icon': Icons.auto_fix_high_outlined, 'filter': DocScanFilter.automatic},
+    {'name': 'Colore', 'icon': Icons.color_lens_outlined, 'filter': DocScanFilter.color},
+    {'name': 'Scala di grigi', 'icon': Icons.filter_b_and_w_outlined, 'filter': DocScanFilter.grayscale},
+    {'name': 'B/N', 'icon': Icons.contrast_outlined, 'filter': DocScanFilter.blackAndWhite},
+    {'name': 'Ombre', 'icon': Icons.nightlight_outlined, 'filter': DocScanFilter.shadows},
+  ];
 
   @override
   void initState() {
     super.initState();
-    _selectedFilter = widget.initialFilter;
-    _isCustomizing = widget.isCustomizing;
-    _brightness = widget.initialBrightness;
-    _contrast = widget.initialContrast;
-    _threshold = widget.initialThreshold; // **NUOVO**
+    _selectedFilterIndex = 0; // Default a "Nessuno"
     _regeneratePreview();
-  }
-
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    super.dispose();
   }
 
   Future<void> _regeneratePreview() async {
     setState(() => _isRendering = true);
     try {
-      final newPath = await DocumentScanner.applyCropAndSave(
+      final selectedFilter = _filters[_selectedFilterIndex]['filter'] as DocScanFilter;
+      final newPath = await DocumentScannerManager.applyCropAndSave(
         imagePath: widget.originalImagePath,
         quad: widget.quad,
         format: DocScanFormat.jpeg,
-        filter: _isCustomizing ? DocScanFilter.custom : _selectedFilter,
-        brightness: _isCustomizing ? _brightness : null,
-        contrast: _isCustomizing ? _contrast : null,
-        threshold: _isCustomizing ? _threshold : null, // **NUOVO**
+        filter: selectedFilter,
       );
-      setState(() {
-        _previewImagePath = newPath;
-        _isRendering = false;
-      });
+      if (mounted) {
+        setState(() {
+          _previewImagePath = newPath;
+          _isRendering = false;
+        });
+      }
     } on PlatformException {
-      setState(() => _isRendering = false);
+      if (mounted) setState(() => _isRendering = false);
     }
   }
 
-  void _onSliderChanged() {
-    if (_debounce?.isActive ?? false) _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 250), () {
-      _regeneratePreview();
+  void _onApply() {
+    final selectedFilter = _filters[_selectedFilterIndex]['filter'] as DocScanFilter;
+    Navigator.pop(context, {
+      'filter': selectedFilter,
+      'isCustomizing': false,
+      'brightness': 0.0,
+      'contrast': 1.0,
+      'threshold': 1.0,
     });
   }
-
-  void _showCustomFilterSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black12,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            return Container(
-              color: Theme.of(context).scaffoldBackgroundColor,
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text("Luminosità", style: Theme.of(context).textTheme.titleMedium),
-                  Slider(
-                    value: _brightness,
-                    min: -100.0,
-                    max: 100.0,
-                    divisions: 20,
-                    label: _brightness.round().toString(),
-                    onChanged: (value) {
-                      setModalState(() => _brightness = value);
-                      _onSliderChanged();
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Text("Contrasto", style: Theme.of(context).textTheme.titleMedium),
-                  Slider(
-                    value: _contrast,
-                    min: 0.5,
-                    max: 2.0,
-                    divisions: 15,
-                    label: _contrast.toStringAsFixed(1),
-                    onChanged: (value) {
-                      setModalState(() => _contrast = value);
-                      _onSliderChanged();
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Text("Soglia B&N", style: Theme.of(context).textTheme.titleMedium), // **NUOVO**
-                  Slider(
-                    value: _threshold,
-                    min: 0.0,
-                    max: 1.0,
-                    divisions: 20,
-                    label: _threshold.toStringAsFixed(2),
-                    onChanged: (value) {
-                      setModalState(() => _threshold = value);
-                      _onSliderChanged();
-                    },
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Seleziona Filtro"),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.check),
-            onPressed: () => Navigator.pop(context, {
-              'filter': _selectedFilter,
-              'isCustomizing': _isCustomizing,
-              'brightness': _brightness,
-              'contrast': _contrast,
-              'threshold': _threshold, // **NUOVO**
-            }),
-          )
-        ],
+        title: const Text("Filtro"),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
       ),
       body: Column(
         children: [
@@ -539,73 +698,113 @@ class _FilterPageState extends State<FilterPage> {
             child: _isRendering
                 ? const Center(child: CircularProgressIndicator())
                 : _previewImagePath != null
-                ? Center(child: Image.file(File(_previewImagePath!)))
+                ? Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: PhotoView(
+                imageProvider: FileImage(File(_previewImagePath!)),
+                backgroundDecoration: const BoxDecoration(color: Colors.transparent),
+                minScale: PhotoViewComputedScale.contained,
+              ),
+            )
                 : const Center(child: Text("Errore anteprima")),
           ),
-          _buildFilterBar(),
+          _buildBottomBar(),
         ],
       ),
     );
   }
 
-  Widget _buildFilterBar() {
+  Widget _buildBottomBar() {
+    final Color selectedColor = Theme.of(context).elevatedButtonTheme.style?.backgroundColor?.resolve({}) ?? const Color(0xFFa8c7fa);
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _buildFilterChip(DocScanFilter.none, "Originale", Icons.image_outlined, false),
-          _buildFilterChip(DocScanFilter.grayscale, "Grigio", Icons.filter_b_and_w_outlined, false),
-          _buildFilterChip(DocScanFilter.blackAndWhite, "B&N", Icons.contrast_outlined, false),
-          _buildFilterChip(null, "Custom", Icons.tune_outlined, true),
-        ],
-      ),
-    );
-  }
+      color: Theme.of(context).appBarTheme.backgroundColor,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: 70,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  itemCount: _filters.length,
+                  itemBuilder: (context, index) {
+                    final filter = _filters[index];
+                    final bool isSelected = index == _selectedFilterIndex;
 
-  Widget _buildFilterChip(DocScanFilter? filter, String label, IconData icon, bool isCustom) {
-    final bool isSelected = isCustom ? _isCustomizing : (_selectedFilter == filter && !_isCustomizing);
+                    final filterWidget = GestureDetector(
+                      onTap: () {
+                        setState(() => _selectedFilterIndex = index);
+                        _regeneratePreview();
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 12.0),
+                        color: Colors.transparent,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              filter['icon'] as IconData,
+                              color: isSelected ? selectedColor : Colors.white,
+                              size: 28,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              filter['name'] as String,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isSelected ? selectedColor : Colors.white,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
-          onTap: () {
-            if (isCustom) {
-              setState(() {
-                _isCustomizing = true;
-              });
-              _showCustomFilterSheet();
-            } else {
-              setState(() {
-                _isCustomizing = false;
-                _selectedFilter = filter!;
-              });
-              _regeneratePreview();
-            }
-          },
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isSelected ? Theme.of(context).primaryColor : Colors.grey.shade300,
-            ),
-            child: Icon(icon, color: isSelected ? Colors.white : Colors.grey.shade700),
+                    if (filter['name'] == 'Ombre') {
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            height: 40,
+                            width: 1,
+                            color: Colors.grey.shade700,
+                            margin: const EdgeInsets.only(right: 12.0),
+                          ),
+                          filterWidget,
+                        ],
+                      );
+                    }
+
+                    return filterWidget;
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _onApply,
+                      child: const Text("Applica"),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 4),
-        Text(label, style: TextStyle(fontSize: 12, color: isSelected ? Theme.of(context).primaryColor : Colors.grey.shade700)),
-      ],
+      ),
     );
   }
 }
 
-
-// --------------------------------------------------
-// 5. WIDGET DI EDITING (CropEditor) CON LENTE CORRETTA
-// --------------------------------------------------
 
 class CropEditor extends StatefulWidget {
   final String imagePath;
@@ -639,23 +838,28 @@ class _CropEditorState extends State<CropEditor> {
     _loadImageDimensions();
   }
 
+  @override
+  void didUpdateWidget(covariant CropEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialQuad != oldWidget.initialQuad) {
+      setState(() {
+        _quad = widget.initialQuad;
+      });
+    }
+  }
+
   Future<void> _loadImageDimensions() async {
     final image = FileImage(File(widget.imagePath));
     final completer = Completer<ui.Image>();
     image.resolve(const ImageConfiguration()).addListener(
       ImageStreamListener((ImageInfo info, bool _) {
-        if (!completer.isCompleted) {
-          completer.complete(info.image);
-        }
+        if (!completer.isCompleted) completer.complete(info.image);
       }),
     );
     final ui.Image imageInfo = await completer.future;
     if (mounted) {
       setState(() {
-        _imageSize = Size(
-          imageInfo.width.toDouble(),
-          imageInfo.height.toDouble(),
-        );
+        _imageSize = Size(imageInfo.width.toDouble(), imageInfo.height.toDouble());
       });
     }
   }
@@ -663,22 +867,16 @@ class _CropEditorState extends State<CropEditor> {
   void _onPanStart(DragStartDetails details, Size containerSize) {
     double minDistance = double.infinity;
     int? closestCorner;
-    final points = [
-      _quad.topLeft, _quad.topRight, _quad.bottomRight, _quad.bottomLeft
-    ];
+    final points = [_quad.topLeft, _quad.topRight, _quad.bottomRight, _quad.bottomLeft];
 
     for (int i = 0; i < points.length; i++) {
-      final uiPoint = Offset(
-        points[i].dx * containerSize.width,
-        (1 - points[i].dy) * containerSize.height,
-      );
+      final uiPoint = Offset(points[i].dx * containerSize.width, (1 - points[i].dy) * containerSize.height);
       final distance = (details.localPosition - uiPoint).distance;
-      if (distance < minDistance) {
+      if (distance < 44) {
         minDistance = distance;
         closestCorner = i;
       }
     }
-
     if (minDistance < 44) {
       _handleDrag(details.localPosition, containerSize, closestCorner!);
     }
@@ -712,7 +910,6 @@ class _CropEditorState extends State<CropEditor> {
     widget.onQuadChanged(newQuad);
   }
 
-
   void _onPanEnd(DragEndDetails details) {
     setState(() {
       _draggingCornerIndex = null;
@@ -722,10 +919,7 @@ class _CropEditorState extends State<CropEditor> {
 
   @override
   Widget build(BuildContext context) {
-    if (_imageSize == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
+    if (_imageSize == null) return const Center(child: CircularProgressIndicator());
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -761,32 +955,16 @@ class _CropEditorState extends State<CropEditor> {
     const double magnifierSize = 120;
     const double zoomFactor = 2.0;
     const double verticalOffset = 40.0;
-
     if (_draggingCornerIndex == null) return const SizedBox.shrink();
-
     final scaffoldBodySize = widget.scaffoldBodyConstraints.biggest;
-    final offsetInScaffold = Offset(
-      (scaffoldBodySize.width - imageContainerSize.width) / 2,
-      (scaffoldBodySize.height - imageContainerSize.height) / 2,
-    );
-
+    final offsetInScaffold = Offset((scaffoldBodySize.width - imageContainerSize.width) / 2, (scaffoldBodySize.height - imageContainerSize.height) / 2);
     double magnifierTop = _dragPosition.dy - magnifierSize - verticalOffset;
-
-    if (magnifierTop + offsetInScaffold.dy < 0) {
-      magnifierTop = _dragPosition.dy + verticalOffset;
-    }
-
-    final finalLeft = (_dragPosition.dx - magnifierSize / 2 + offsetInScaffold.dx)
-        .clamp(0.0, scaffoldBodySize.width - magnifierSize) - offsetInScaffold.dx;
-
-    final finalTop = (magnifierTop + offsetInScaffold.dy)
-        .clamp(0.0, scaffoldBodySize.height - magnifierSize) - offsetInScaffold.dy;
-
+    if (magnifierTop + offsetInScaffold.dy < 0) magnifierTop = _dragPosition.dy + verticalOffset;
+    final finalLeft = (_dragPosition.dx - magnifierSize / 2 + offsetInScaffold.dx).clamp(0.0, scaffoldBodySize.width - magnifierSize) - offsetInScaffold.dx;
+    final finalTop = (magnifierTop + offsetInScaffold.dy).clamp(0.0, scaffoldBodySize.height - magnifierSize) - offsetInScaffold.dy;
     final magnifierPosition = Offset(finalLeft, finalTop);
-
     final contentLeft = magnifierSize / 2 - _dragPosition.dx * zoomFactor;
     final contentTop = magnifierSize / 2 - _dragPosition.dy * zoomFactor;
-
     return Positioned(
       left: magnifierPosition.dx,
       top: magnifierPosition.dy,
@@ -815,38 +993,16 @@ class _CropEditorState extends State<CropEditor> {
                       height: imageContainerSize.height,
                       child: Stack(
                         children: [
-                          Image.file(
-                            File(widget.imagePath),
-                            fit: BoxFit.contain,
-                            alignment: Alignment.topLeft,
-                          ),
-                          CustomPaint(
-                            size: imageContainerSize,
-                            painter: CropPainter(_quad),
-                          ),
+                          Image.file(File(widget.imagePath), fit: BoxFit.contain, alignment: Alignment.topLeft),
+                          CustomPaint(size: imageContainerSize, painter: CropPainter(_quad)),
                         ],
                       ),
                     ),
                   ),
                 ),
-                Container(
-                  width: magnifierSize,
-                  height: 1.5,
-                  color: Colors.blue.withOpacity(0.7),
-                ),
-                Container(
-                  width: 1.5,
-                  height: magnifierSize,
-                  color: Colors.blue.withOpacity(0.7),
-                ),
-                Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.blue, width: 1.5)
-                  ),
-                )
+                Container(width: magnifierSize, height: 1.5, color: Colors.blue.withOpacity(0.7)),
+                Container(width: 1.5, height: magnifierSize, color: Colors.blue.withOpacity(0.7)),
+                Container(width: 20, height: 20, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.blue, width: 1.5))),
               ],
             ),
           ),
@@ -856,19 +1012,9 @@ class _CropEditorState extends State<CropEditor> {
   }
 
   List<Widget> _buildCornerHandles(Size containerSize) {
-    final points = [
-      _quad.topLeft,
-      _quad.topRight,
-      _quad.bottomRight,
-      _quad.bottomLeft,
-    ];
-
+    final points = [_quad.topLeft, _quad.topRight, _quad.bottomRight, _quad.bottomLeft];
     return List.generate(4, (index) {
-      final uiPoint = Offset(
-        points[index].dx * containerSize.width,
-        (1 - points[index].dy) * containerSize.height,
-      );
-
+      final uiPoint = Offset(points[index].dx * containerSize.width, (1 - points[index].dy) * containerSize.height);
       return Positioned(
         left: uiPoint.dx - 22,
         top: uiPoint.dy - 22,
@@ -876,10 +1022,7 @@ class _CropEditorState extends State<CropEditor> {
           child: Container(
             width: 44,
             height: 44,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.transparent,
-            ),
+            decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.transparent),
             child: Center(
               child: Container(
                 width: 22,
@@ -898,10 +1041,6 @@ class _CropEditorState extends State<CropEditor> {
     });
   }
 }
-
-// --------------------------------------------------
-// 6. WIDGET AUSILIARI (CropPainter, ImageDetailPage)
-// --------------------------------------------------
 
 class CropPainter extends CustomPainter {
   final Quadrilateral quad;
@@ -927,16 +1066,13 @@ class CropPainter extends CustomPainter {
 
 class ImageDetailPage extends StatelessWidget {
   final String imagePath;
-
   const ImageDetailPage({super.key, required this.imagePath});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black,
-          elevation: 0,
-          iconTheme: const IconThemeData(color: Colors.white)),
+      appBar: AppBar(backgroundColor: Colors.black, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)),
       body: PhotoView(
         imageProvider: FileImage(File(imagePath)),
         minScale: PhotoViewComputedScale.contained,

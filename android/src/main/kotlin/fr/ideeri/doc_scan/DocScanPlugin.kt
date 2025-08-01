@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
+import org.opencv.core.Core
+import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
@@ -293,30 +295,76 @@ class DocScanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         val mat = Mat()
         Utils.bitmapToMat(bitmap, mat)
 
-        if (filterName != "none") {
-            Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
-        }
-
         when (filterName) {
+            "automatic" -> {
+                // Pipeline di pulizia avanzata per un effetto scanner perfetto, anche con macchie e timbri.
+
+                // 1. Converti in scala di grigi
+                val grayMat = Mat()
+                Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_RGBA2GRAY)
+
+                // 2. Rimuovi il rumore iniziale. Un leggero blur mediano è efficace per
+                // eliminare piccole imperfezioni ("sale e pepe") senza danneggiare i bordi del testo.
+                val denoisedMat = Mat()
+                Imgproc.medianBlur(grayMat, denoisedMat, 3)
+
+                // 3. Applica un sharpening (maschera di contrasto) per rendere il testo più nitido.
+                // Questo passaggio è cruciale per definire bene i caratteri.
+                val sharpenedMat = Mat()
+                val blurred = Mat()
+                Imgproc.GaussianBlur(denoisedMat, blurred, Size(0.0, 0.0), 3.0)
+                Core.addWeighted(denoisedMat, 1.5, blurred, -0.5, 0.0, sharpenedMat)
+
+                // 4. Binarizzazione adattiva finale. Questo è il passo chiave per la pulizia.
+                // A differenza di Otsu (globale), questo metodo calcola la soglia localmente,
+                // ignorando le grandi aree scure (come i timbri) e pulendo efficacemente lo sfondo.
+                Imgproc.adaptiveThreshold(
+                    sharpenedMat, // Immagine di input (già elaborata)
+                    mat,          // Immagine di output
+                    255.0,        // Valore massimo (bianco)
+                    Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    Imgproc.THRESH_BINARY,
+                    55,           // Un blockSize grande per creare uno sfondo molto pulito e uniforme.
+                    12.0          // Costante C per calibrare la soglia e rimuovere ogni residuo grigio.
+                )
+
+                // 5. Pulizia finale del rumore potenziata.
+                // Questa operazione morfologica (MORPH_OPEN) rimuove i piccoli puntini neri
+                // residui. Ho aumentato la dimensione del kernel per rimuovere più rumore.
+                val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+                Imgproc.morphologyEx(mat, mat, Imgproc.MORPH_OPEN, kernel)
+
+
+                // Rilascia le matrici intermedie per liberare memoria
+                grayMat.release()
+                denoisedMat.release()
+                sharpenedMat.release()
+                blurred.release()
+            }
+            "grayscale" -> {
+                Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
+            }
             "blackAndWhite" -> {
+                Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
                 mat.convertTo(mat, -1, 1.5, (1.0 - 1.5) * 127)
             }
+            "shadows" -> {
+                Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
+                Imgproc.threshold(mat, mat, 127.0, 255.0, Imgproc.THRESH_BINARY)
+            }
             "custom" -> {
-                var b = 0.0
-                var c = 1.0
-                if (brightness != null) {
-                    b = (brightness / 100.0) * 127.0
-                }
-                if (contrast != null) {
-                    c = contrast
-                }
+                Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
+                var b = brightness ?: 0.0
+                var c = contrast ?: 1.0
+                b = (b / 100.0) * 127.0
                 mat.convertTo(mat, -1, c, b)
-
                 if (threshold != null) {
-                    // **CORREZIONE**: Limita il valore massimo della soglia per evitare un'immagine nera
                     val threshValue = (threshold * 255).coerceAtMost(254.0)
                     Imgproc.threshold(mat, mat, threshValue, 255.0, Imgproc.THRESH_BINARY)
                 }
+            }
+            "none", "color" -> {
+                // Nessuna operazione
             }
         }
 
